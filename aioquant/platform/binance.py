@@ -39,7 +39,7 @@ class BinanceRestAPI:
         secret_key: Account's SECRET KEY.
     """
 
-    def __init__(self, host, access_key, secret_key):
+    def __init__(self, access_key, secret_key, host="https://api.binance.com"):
         """Initialize REST API client."""
         self._host = host
         self._access_key = access_key
@@ -271,6 +271,19 @@ class BinanceRestAPI:
         success, error = await self.request("DELETE", uri, params=params)
         return success, error
 
+    async def get_klines(self, symbol, startTime, endTime,interval="1m",  limit=500):
+        """Get kilnes list"""
+        uri = "/api/v3/klines"
+        params = {
+            "symbol": symbol,
+            "interval": interval,
+            "startTime": startTime,
+            "endTime": endTime,
+            "limit": limit
+        }
+        success, error = await self.request("GET", uri, params=params)
+        return success, error
+
     async def request(self, method, uri, params=None, body=None, headers=None, auth=False):
         """Do HTTP request.
 
@@ -294,11 +307,13 @@ class BinanceRestAPI:
             data.update(body)
 
         if data:
-            query = "&".join(["=".join([str(k), str(v)]) for k, v in data.items()])
+            query = "&".join(["=".join([str(k), str(v)])
+                             for k, v in data.items()])
         else:
             query = ""
         if auth and query:
-            signature = hmac.new(self._secret_key.encode(), query.encode(), hashlib.sha256).hexdigest()
+            signature = hmac.new(self._secret_key.encode(
+            ), query.encode(), hashlib.sha256).hexdigest()
             query += "&signature={s}".format(s=signature)
         if query:
             url += ("?" + query)
@@ -366,13 +381,16 @@ class BinanceTrade:
         self._init_callback = kwargs.get("init_callback")
         self._error_callback = kwargs.get("error_callback")
 
-        self._raw_symbol = self._symbol.replace("/", "")  # Row symbol name, same as Binance Exchange.
+        # Row symbol name, same as Binance Exchange.
+        self._raw_symbol = self._symbol.replace("/", "")
         self._listen_key = None  # Listen key for Websocket authentication.
-        self._assets = {}  # Asset data. e.g. {"BTC": {"free": "1.1", "locked": "2.2", "total": "3.3"}, ... }
+        # Asset data. e.g. {"BTC": {"free": "1.1", "locked": "2.2", "total": "3.3"}, ... }
+        self._assets = {}
         self._orders = {}  # Order data. e.g. {order_no: order, ... }
 
         # Initialize our REST API client.
-        self._rest_api = BinanceRestAPI(self._host, self._access_key, self._secret_key)
+        self._rest_api = BinanceRestAPI(
+            self._host, self._access_key, self._secret_key)
 
         # Create a loop run task to reset listen key every 30 minutes.
         LoopRunTask.register(self._reset_listen_key, 60 * 30)
@@ -411,7 +429,8 @@ class BinanceTrade:
         self._listen_key = success["listenKey"]
         uri = "/ws/" + self._listen_key
         url = urljoin(self._wss, uri)
-        self._ws = Websocket(url, self.connected_callback, process_callback=self.process)
+        self._ws = Websocket(url, self.connected_callback,
+                             process_callback=self.process)
 
     async def _reset_listen_key(self, *args, **kwargs):
         """Reset listen key."""
@@ -423,7 +442,8 @@ class BinanceTrade:
 
     async def connected_callback(self):
         """After websocket connection created successfully, pull back all open order information."""
-        logger.info("Websocket connection authorized successfully.", caller=self)
+        logger.info(
+            "Websocket connection authorized successfully.", caller=self)
         order_infos, error = await self._rest_api.get_open_orders(self._raw_symbol)
         if error:
             e = Error("get open orders error: {}".format(error))
@@ -549,6 +569,8 @@ class BinanceTrade:
                 order_id = str(order_info["orderId"])
                 order_ids.append(order_id)
             return order_ids, None
+
+
 
     @async_method_locker("BinanceTrade.process.locker")
     async def process(self, msg):
