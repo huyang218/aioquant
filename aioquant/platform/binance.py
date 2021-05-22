@@ -13,7 +13,6 @@ import json
 import copy
 import hmac
 import hashlib
-import binance_f
 
 from urllib.parse import urljoin
 
