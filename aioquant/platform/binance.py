@@ -382,9 +382,118 @@ class BinanceRestAPI:
         return success, error
 
 
+class BinanceMarginAPI:
+    """
+    币安杠杆交易API
+    """
+    def __init__(self, access_key, secret_key, host="https://api.binance.com"):
+        """Initialize REST API client."""
+        self._host = host
+        self._access_key = access_key
+        self._secret_key = secret_key
+
+    async def get_user_account(self,symbols=None):
+        """
+        查询杠杆逐仓账户信息
+        {
+            "assets":[
+                {
+                    "baseAsset": 
+                    {
+                    "asset": "BTC",
+                    "borrowEnabled": true,
+                    "borrowed": "0.00000000",
+                    "free": "0.00000000",
+                    "interest": "0.00000000",
+                    "locked": "0.00000000",
+                    "netAsset": "0.00000000",
+                    "netAssetOfBtc": "0.00000000",
+                    "repayEnabled": true,
+                    "totalAsset": "0.00000000"
+                    },
+                    "quoteAsset": 
+                    {
+                    "asset": "USDT",
+                    "borrowEnabled": true,
+                    "borrowed": "0.00000000",
+                    "free": "0.00000000",
+                    "interest": "0.00000000",
+                    "locked": "0.00000000",
+                    "netAsset": "0.00000000",
+                    "netAssetOfBtc": "0.00000000",
+                    "repayEnabled": true,
+                    "totalAsset": "0.00000000"
+                    },
+                    "symbol": "BTCUSDT"
+                    "isolatedCreated": true, 
+                    "marginLevel": "0.00000000", 
+                    "marginLevelStatus": "EXCESSIVE", // "EXCESSIVE", "NORMAL", "MARGIN_CALL", "PRE_LIQUIDATION", "FORCE_LIQUIDATION"
+                    "marginRatio": "0.00000000",
+                    "indexPrice": "10000.00000000"
+                    "liquidatePrice": "1000.00000000",
+                    "liquidateRate": "1.00000000"
+                    "tradeEnabled": true
+                }
+                ],
+                "totalAssetOfBtc": "0.00000000",
+                "totalLiabilityOfBtc": "0.00000000",
+                "totalNetAssetOfBtc": "0.00000000" 
+            }
+        """
+        uri = "/sapi/v1/margin/isolated/account"
+        params = {
+            "timestamp": tools.get_cur_timestamp_ms()
+        }
+        if(symbols is not None):
+            params["symbols"] = symbols
+        
+        success, error = await self.request("GET", uri, params=params, auth=True)
+        return success, error
+
+    async def request(self, method, uri, params=None, body=None, headers=None, auth=False):
+        """Do HTTP request.
+
+        Args:
+            method: HTTP request method. `GET` / `POST` / `DELETE` / `PUT`.
+            uri: HTTP request uri.
+            params: HTTP query params.
+            body:   HTTP request body.
+            headers: HTTP request headers.
+            auth: If this request requires authentication.
+
+        Returns:
+            success: Success results, otherwise it's None.
+            error: Error information, otherwise it's None.
+        """
+        url = urljoin(self._host, uri)
+        data = {}
+        if params:
+            data.update(params)
+        if body:
+            data.update(body)
+
+        if data:
+            query = "&".join(["=".join([str(k), str(v)])
+                              for k, v in data.items()])
+        else:
+            query = ""
+        if auth and query:
+            signature = hmac.new(self._secret_key.encode(
+            ), query.encode(), hashlib.sha256).hexdigest()
+            query += "&signature={s}".format(s=signature)
+        if query:
+            url += ("?" + query)
+
+        if not headers:
+            headers = {}
+        headers["X-MBX-APIKEY"] = self._access_key
+        _, success, error = await AsyncHttpRequests.fetch(method, url, headers=headers, timeout=10, verify_ssl=False)
+        return success, error
+
+
 class BinanceUFutureAPI:
     """
-    币安交易所API，U本位交易模型
+    币安合约交易API，U本位交易模型
     """
 
     def __init__(self, access_key, secret_key, host="https://fapi.binance.com"):
@@ -494,7 +603,113 @@ class BinanceUFutureAPI:
         success, error = await self.request("GET", uri, params=params, auth=True)
         return success, error
 
+    async def get_balance(self):
+        """
+        账户余额V2
 
+        [
+            {
+                "accountAlias": "SgsR",    // 账户唯一识别码
+                "asset": "USDT",        // 资产
+                "balance": "122607.35137903",   // 总余额
+                "crossWalletBalance": "23.72469206", // 全仓余额
+                "crossUnPnl": "0.00000000"  // 全仓持仓未实现盈亏
+                "availableBalance": "23.72469206",       // 下单可用余额
+                "maxWithdrawAmount": "23.72469206",     // 最大可转出余额
+                "marginAvailable": true,    // 是否可用作联合保证金
+                "updateTime": 1617939110373
+            }
+        ]
+        """
+        uri = "/fapi/v2/balance"
+
+        params = {
+            "timestamp": tools.get_cur_timestamp_ms()
+        }
+        
+        success, error = await self.request("GET", uri, params=params, auth=True)
+        return success, error
+
+    async def get_user_account(self):
+        """
+        账户信息V2
+
+        {
+            "feeTier": 0,  // 手续费等级
+            "canTrade": true,  // 是否可以交易
+            "canDeposit": true,  // 是否可以入金
+            "canWithdraw": true, // 是否可以出金
+            "updateTime": 0,
+            "totalInitialMargin": "0.00000000",  // 但前所需起始保证金总额(存在逐仓请忽略), 仅计算usdt资产
+            "totalMaintMargin": "0.00000000",  // 维持保证金总额, 仅计算usdt资产
+            "totalWalletBalance": "23.72469206",   // 账户总余额, 仅计算usdt资产
+            "totalUnrealizedProfit": "0.00000000",  // 持仓未实现盈亏总额, 仅计算usdt资产
+            "totalMarginBalance": "23.72469206",  // 保证金总余额, 仅计算usdt资产
+            "totalPositionInitialMargin": "0.00000000",  // 持仓所需起始保证金(基于最新标记价格), 仅计算usdt资产
+            "totalOpenOrderInitialMargin": "0.00000000",  // 当前挂单所需起始保证金(基于最新标记价格), 仅计算usdt资产
+            "totalCrossWalletBalance": "23.72469206",  // 全仓账户余额, 仅计算usdt资产
+            "totalCrossUnPnl": "0.00000000",    // 全仓持仓未实现盈亏总额, 仅计算usdt资产
+            "availableBalance": "23.72469206",       // 可用余额, 仅计算usdt资产
+            "maxWithdrawAmount": "23.72469206"     // 最大可转出余额, 仅计算usdt资产
+            "assets": [
+                {
+                    "asset": "USDT",        //资产
+                    "walletBalance": "23.72469206",  //余额
+                    "unrealizedProfit": "0.00000000",  // 未实现盈亏
+                    "marginBalance": "23.72469206",  // 保证金余额
+                    "maintMargin": "0.00000000",    // 维持保证金
+                    "initialMargin": "0.00000000",  // 当前所需起始保证金
+                    "positionInitialMargin": "0.00000000",  // 持仓所需起始保证金(基于最新标记价格)
+                    "openOrderInitialMargin": "0.00000000", // 当前挂单所需起始保证金(基于最新标记价格)
+                    "crossWalletBalance": "23.72469206",  //全仓账户余额
+                    "crossUnPnl": "0.00000000" // 全仓持仓未实现盈亏
+                    "availableBalance": "23.72469206",       // 可用余额
+                    "maxWithdrawAmount": "23.72469206",     // 最大可转出余额
+                    "marginAvailable": true    // 是否可用作联合保证金
+                },
+                {
+                    "asset": "BUSD",        //资产
+                    "walletBalance": "103.12345678",  //余额
+                    "unrealizedProfit": "0.00000000",  // 未实现盈亏
+                    "marginBalance": "103.12345678",  // 保证金余额
+                    "maintMargin": "0.00000000",    // 维持保证金
+                    "initialMargin": "0.00000000",  // 当前所需起始保证金
+                    "positionInitialMargin": "0.00000000",  // 持仓所需起始保证金(基于最新标记价格)
+                    "openOrderInitialMargin": "0.00000000", // 当前挂单所需起始保证金(基于最新标记价格)
+                    "crossWalletBalance": "103.12345678",  //全仓账户余额
+                    "crossUnPnl": "0.00000000" // 全仓持仓未实现盈亏
+                    "availableBalance": "103.12345678",       // 可用余额
+                    "maxWithdrawAmount": "103.12345678",     // 最大可转出余额
+                    "marginAvailable": true    // 否可用作联合保证金
+                }
+            ],
+            "positions": [  // 头寸，将返回所有市场symbol。
+                //根据用户持仓模式展示持仓方向，即双向模式下只返回BOTH持仓情况，单向模式下只返回 LONG 和 SHORT 持仓情况
+                {
+                    "symbol": "BTCUSDT",  // 交易对
+                    "initialMargin": "0",   // 当前所需起始保证金(基于最新标记价格)
+                    "maintMargin": "0", //维持保证金
+                    "unrealizedProfit": "0.00000000",  // 持仓未实现盈亏
+                    "positionInitialMargin": "0",  // 持仓所需起始保证金(基于最新标记价格)
+                    "openOrderInitialMargin": "0",  // 当前挂单所需起始保证金(基于最新标记价格)
+                    "leverage": "100",  // 杠杆倍率
+                    "isolated": true,  // 是否是逐仓模式
+                    "entryPrice": "0.00000",  // 持仓成本价
+                    "maxNotional": "250000",  // 当前杠杆下用户可用的最大名义价值
+                    "positionSide": "BOTH",  // 持仓方向
+                    "positionAmt": "0"      // 持仓数量
+                }
+            ]
+        }
+        """
+        uri = "/fapi/v2/account"
+
+        params = {
+            "timestamp": tools.get_cur_timestamp_ms()
+        }
+        
+        success, error = await self.request("GET", uri, params=params, auth=True)
+        return success, error
 
     async def request(self, method, uri, params=None, body=None, headers=None, auth=False):
         """Do HTTP request.
