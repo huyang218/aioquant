@@ -19,7 +19,7 @@ from urllib.parse import urljoin
 from aioquant.error import Error
 from aioquant.utils import tools
 from aioquant.utils import logger
-from aioquant.order import Order
+from aioquant.order import Order, TRADE_TYPE_BUY_OPEN
 from aioquant.tasks import SingleTask, LoopRunTask
 from aioquant.utils.decorator import async_method_locker
 from aioquant.utils.web import Websocket, AsyncHttpRequests
@@ -192,20 +192,47 @@ class BinanceRestAPI:
         success, error = await self.request("GET", uri, params=params, auth=True)
         return success, error
 
-    async def get_all_orders(self, symbol):
-        """Get all account orders; active, canceled, or filled.
-        Args:
-            symbol: Symbol name, e.g. `BTCUSDT`.
+    async def get_all_orders(self, symbol, order_id=None, start_time=None, end_time=None, limit=500):
+        """
+        查询所有订单
+        获取所有帐户订单； 有效，已取消或已完成
 
-        Returns:
-            success: Success results, otherwise it's None.
-            error: Error information, otherwise it's None.
+        [
+            {
+                "symbol": "LTCBTC",
+                "orderId": 1,
+                "orderListId": -1, //Unless OCO, the value will always be -1
+                "clientOrderId": "myOrder1",
+                "price": "0.1",
+                "origQty": "1.0",
+                "executedQty": "0.0",
+                "cummulativeQuoteQty": "0.0",
+                "status": "NEW",
+                "timeInForce": "GTC",
+                "type": "LIMIT",
+                "side": "BUY",
+                "stopPrice": "0.0",
+                "icebergQty": "0.0",
+                "time": 1499827319559,
+                "updateTime": 1499827319559,
+                "isWorking": true,
+                "origQuoteOrderQty": "0.000000"
+            }
+        ]
         """
         uri = "/api/v3/allOrders"
         params = {
             "symbol": symbol,
             "timestamp": tools.get_cur_timestamp_ms()
         }
+
+        if(order_id is not None):
+            params["orderId"] = order_id
+        if(start_time is not None):
+            params["startTime"] = start_time
+        if(end_time is not None):
+            params["endTime"] = end_time
+
         success, error = await self.request("GET", uri, params=params, auth=True)
         return success, error
 
@@ -386,13 +413,14 @@ class BinanceMarginAPI:
     """
     币安杠杆交易API
     """
+
     def __init__(self, access_key, secret_key, host="https://api.binance.com"):
         """Initialize REST API client."""
         self._host = host
         self._access_key = access_key
         self._secret_key = secret_key
 
-    async def get_user_account(self,symbols=None):
+    async def get_user_account(self, symbols=None):
         """
         查询杠杆逐仓账户信息
         {
@@ -446,7 +474,167 @@ class BinanceMarginAPI:
         }
         if(symbols is not None):
             params["symbols"] = symbols
-        
+
+        success, error = await self.request("GET", uri, params=params, auth=True)
+        return success, error
+
+    async def get_all_orders(self, symbol, is_isolated="FALSE", order_id=None, start_time=None, end_time=None, limit=500):
+        """
+        查询杠杆账户的所有订单
+        如果设置 orderId , 获取订单 >= orderId， 否则返回近期订单历史。
+        一些历史订单的 cummulativeQuoteQty < 0, 是指当前数据不存在。
+        [
+            {
+                "clientOrderId": "D2KDy4DIeS56PvkM13f8cP",
+                "cummulativeQuoteQty": "0.00000000",
+                "executedQty": "0.00000000",
+                "icebergQty": "0.00000000",
+                "isWorking": false,
+                "orderId": 41295,
+                "origQty": "5.31000000",
+                "price": "0.22500000",
+                "side": "SELL",
+                "status": "CANCELED",
+                "stopPrice": "0.18000000",
+                "symbol": "BNBBTC",
+                "isIsolated": false,       // 是否是逐仓symbol交易 
+                "time": 1565769338806,
+                "timeInForce": "GTC",
+                "type": "TAKE_PROFIT_LIMIT",
+                "updateTime": 1565769342148
+            },
+            {
+                "clientOrderId": "gXYtqhcEAs2Rn9SUD9nRKx",
+                "cummulativeQuoteQty": "0.00000000",
+                "executedQty": "0.00000000",
+                "icebergQty": "1.00000000",
+                "isWorking": true,
+                "orderId": 41296,
+                "origQty": "6.65000000",
+                "price": "0.18000000",
+                "side": "SELL",
+                "status": "CANCELED",
+                "stopPrice": "0.00000000",
+                "symbol": "BNBBTC",
+                "isIsolated": false,       // 是否是逐仓symbol交易 
+                "time": 1565769348687,
+                "timeInForce": "GTC",
+                "type": "LIMIT",
+                "updateTime": 1565769352226
+            }
+
+        ]
+        """
+        uri = "/sapi/v1/margin/allOrders"
+        params = {
+            "symbol": symbol,
+            "isIsolated": is_isolated,
+            "timestamp": tools.get_cur_timestamp_ms()
+        }
+        if(order_id is not None):
+            params["orderId"] = order_id
+        if(start_time is not None):
+            params["startTime"] = start_time
+        if(end_time is not None):
+            params["endTime"] = end_time
+
+        success, error = await self.request("GET", uri, params=params, auth=True)
+        return success, error
+
+    async def getMyTrades(self, symbol, is_isolated="FALSE", from_id=None, start_time=None, end_time=None, limit=500):
+        """
+        查询杠杆账户交易历史
+        如果设置 fromId , 获取订单 id >= fromId， 否则返回近期订单历史。
+        [
+            {
+                "commission": "0.00006000",
+                "commissionAsset": "BTC",
+                "id": 34,
+                "isBestMatch": true,
+                "isBuyer": false,
+                "isMaker": false,
+                "orderId": 39324,
+                "price": "0.02000000",
+                "qty": "3.00000000",
+                "symbol": "BNBBTC",
+                "isIsolated": false,      // 是否是逐仓symbol交易
+                "time": 1561973357171
+            },
+            {
+                "commission": "0.00002950",
+                "commissionAsset": "BTC",
+                "id": 32,
+                "isBestMatch": true,
+                "isBuyer": false,
+                "isMaker": true,
+                "orderId": 39319,
+                "price": "0.00590000",
+                "qty": "5.00000000",
+                "symbol": "BNBBTC",
+                "isIsolated": false,      // 是否是逐仓symbol交易
+                "time": 1561964645345
+            }
+        ]
+        """
+        uri = "/sapi/v1/margin/myTrades"
+        params = {
+            "symbol": symbol,
+            "isIsolated": is_isolated,
+            "timestamp": tools.get_cur_timestamp_ms()
+        }
+        if(from_id is not None):
+            params["fromId"] = from_id
+        if(start_time is not None):
+            params["startTime"] = start_time
+        if(end_time is not None):
+            params["endTime"] = end_time
+
+        success, error = await self.request("GET", uri, params=params, auth=True)
+        return success, error
+
+    async def get_interest_history(self, asset=None, isolated_symbol=None, start_time=None, end_time=None, current=1, size=100, archived="false"):
+        """
+        获取利息历史
+        响应返回为降序排列。
+            如果发送isolatedSymbol，返回指定逐仓symbol的记录。
+            如果想查询6个月以前数据，设置 archived 为 true。
+            返回的type数据有4种类型:
+            PERIODIC 每小时收的利息
+            ON_BORROW 借款的时候第一次收的利息
+            PERIODIC_CONVERTED 每小时收的利息，用BNB抵扣
+            ON_BORROW_CONVERTED 借款的时候第一次收的利息，用BNB抵扣
+
+        {
+            "rows":[
+                {
+                    "isolatedSymbol": "BNBUSDT", / 返回逐仓symbol; 若是全仓不会返回此字段
+                    "asset": "BNB",
+                    "interest": "0.02414667",
+                    "interestAccuredTime": 1566813600000,
+                    "interestRate": "0.01600000",
+                    "principal": "36.22000000",
+                    "type": "ON_BORROW"
+                }
+            ],
+            "total": 1
+        }
+        """
+        uri = "/sapi/v1/margin/interestHistory"
+        params = {
+            "current": current,
+            "size": size,
+            "archived": archived,
+            "timestamp": tools.get_cur_timestamp_ms()
+        }
+        if(asset is not None):
+            params["asset"] = asset
+        if(isolated_symbol is not None):
+            params["isolatedSymbol"] = isolated_symbol
+        if(start_time is not None):
+            params["startTime"] = start_time
+        if(end_time is not None):
+            params["endTime"] = end_time
+
         success, error = await self.request("GET", uri, params=params, auth=True)
         return success, error
 
@@ -524,6 +712,32 @@ class BinanceUFutureAPI:
             订单的最终状态为 CANCELED 或者 EXPIRED, 并且
             订单没有任何的成交记录, 并且
             订单生成时间 + 7天 < 当前时间
+
+        {
+            "avgPrice": "0.00000",              // 平均成交价
+            "clientOrderId": "abc",             // 用户自定义的订单号
+            "cumQuote": "0",                    // 成交金额
+            "executedQty": "0",                 // 成交量
+            "orderId": 1573346959,              // 系统订单号
+            "origQty": "0.40",                  // 原始委托数量
+            "origType": "TRAILING_STOP_MARKET", // 触发前订单类型
+            "price": "0",                       // 委托价格
+            "reduceOnly": false,                // 是否仅减仓
+            "side": "BUY",                      // 买卖方向
+            "positionSide": "SHORT",            // 持仓方向
+            "status": "NEW",                    // 订单状态
+            "stopPrice": "9300",                    // 触发价，对`TRAILING_STOP_MARKET`无效
+            "closePosition": false,   // 是否条件全平仓
+            "symbol": "BTCUSDT",                // 交易对
+            "time": 1579276756075,              // 订单时间
+            "timeInForce": "GTC",               // 有效方法
+            "type": "TRAILING_STOP_MARKET",     // 订单类型
+            "activatePrice": "9020",            // 跟踪止损激活价格, 仅`TRAILING_STOP_MARKET` 订单返回此字段
+            "priceRate": "0.3",                 // 跟踪止损回调比例, 仅`TRAILING_STOP_MARKET` 订单返回此字段
+            "updateTime": 1579276756075,        // 更新时间
+            "workingType": "CONTRACT_PRICE", // 条件价格触发类型
+            "priceProtect": false            // 是否开启条件单触发保护
+        }
         """
         uri = "/fapi/v1/order"
         params = {
@@ -536,14 +750,39 @@ class BinanceUFutureAPI:
         return success, error
 
     async def get_all_orders(self, symbol, order_id=None, start_time=None, end_time=None, limit=500):
-        """Get all account orders; active, canceled, or filled.
-        These orders will not be found:
-        order status is CANCELED or EXPIRED, AND
-        order has NO filled trade, AND
-        created time + 7 days < current time 
-
-        If orderId is set, it will get orders >= that orderId. Otherwise most recent orders are returned.
-        The query time period must be less then 7 days( default as the recent 7 days).
+        """
+        查询所有订单(包括历史订单)
+        请注意，如果订单满足如下条件，不会被查询到：
+        订单的最终状态为 CANCELED 或者 EXPIRED, 并且
+        订单没有任何的成交记录, 并且
+        订单生成时间 + 7天 < 当前时间
+        [
+            {
+                "avgPrice": "0.00000",              // 平均成交价
+                "clientOrderId": "abc",             // 用户自定义的订单号
+                "cumQuote": "0",                        // 成交金额
+                "executedQty": "0",                 // 成交量
+                "orderId": 1917641,                 // 系统订单号
+                "origQty": "0.40",                  // 原始委托数量
+                "origType": "TRAILING_STOP_MARKET", // 触发前订单类型
+                "price": "0",                   // 委托价格
+                "reduceOnly": false,                // 是否仅减仓
+                "side": "BUY",                      // 买卖方向
+                "positionSide": "SHORT", // 持仓方向
+                "status": "NEW",                    // 订单状态
+                "stopPrice": "9300",                    // 触发价，对`TRAILING_STOP_MARKET`无效
+                "closePosition": false,             // 是否条件全平仓
+                "symbol": "BTCUSDT",                // 交易对
+                "time": 1579276756075,              // 订单时间
+                "timeInForce": "GTC",               // 有效方法
+                "type": "TRAILING_STOP_MARKET",     // 订单类型
+                "activatePrice": "9020", // 跟踪止损激活价格, 仅`TRAILING_STOP_MARKET` 订单返回此字段
+                "priceRate": "0.3", // 跟踪止损回调比例, 仅`TRAILING_STOP_MARKET` 订单返回此字段
+                "updateTime": 1579276756075,        // 更新时间
+                "workingType": "CONTRACT_PRICE", // 条件价格触发类型
+                "priceProtect": false            // 是否开启条件单触发保护
+            }
+        ]
          """
         uri = "/fapi/v1/allOrders"
 
@@ -552,7 +791,7 @@ class BinanceUFutureAPI:
             "timestamp": tools.get_cur_timestamp_ms()
         }
         if(order_id is not None):
-            params.orderId = order_id
+            params["orderId"] = order_id
         if(start_time is not None):
             params["startTime"] = start_time
         if(end_time is not None):
@@ -561,7 +800,7 @@ class BinanceUFutureAPI:
         success, error = await self.request("GET", uri, params=params, auth=True)
         return success, error
 
-    async def get_open_order(self,symbol,order_id=None):
+    async def get_open_order(self, symbol, order_id=None):
         """
         查询当前挂单
         {
@@ -599,7 +838,7 @@ class BinanceUFutureAPI:
 
         if(order_id is not None):
             params["orderId"] = order_id
-        
+
         success, error = await self.request("GET", uri, params=params, auth=True)
         return success, error
 
@@ -626,7 +865,7 @@ class BinanceUFutureAPI:
         params = {
             "timestamp": tools.get_cur_timestamp_ms()
         }
-        
+
         success, error = await self.request("GET", uri, params=params, auth=True)
         return success, error
 
@@ -707,9 +946,102 @@ class BinanceUFutureAPI:
         params = {
             "timestamp": tools.get_cur_timestamp_ms()
         }
-        
+
         success, error = await self.request("GET", uri, params=params, auth=True)
         return success, error
+
+    async def get_income(self, symbol=None, income_type=None, start_time=None, end_time=None, limit=500):
+        """
+        获取账户损益资金流水
+        如果startTime 和 endTime 均未发送, 只会返回最近7天的数据。
+        如果incomeType没有发送，返回所有类型账户损益资金流水。
+        "trandId" 在相同用户的同一种收益流水类型中是唯一的。
+        incomeType	收益类型 "TRANSFER"，"WELCOME_BONUS", "REALIZED_PNL"，"FUNDING_FEE", "COMMISSION", and "INSURANCE_CLEAR"
+        [
+            {
+                "symbol": "", // 交易对，仅针对涉及交易对的资金流
+                "incomeType": "TRANSFER",   // 资金流类型
+                "income": "-0.37500000", // 资金流数量，正数代表流入，负数代表流出
+                "asset": "USDT", // 资产内容
+                "info":"TRANSFER", // 备注信息，取决于流水类型
+                "time": 1570608000000, // 时间
+                "tranId":"9689322392",      // 划转ID
+                "tradeId":""                    // 引起流水产生的原始交易ID
+            },
+            {
+                "symbol": "BTCUSDT",
+                "incomeType": "COMMISSION", 
+                "income": "-0.01000000",
+                "asset": "USDT",
+                "info":"COMMISSION",
+                "time": 1570636800000,
+                "tranId":"9689322392",      
+                "tradeId":"2059192"                 
+            }
+        ]
+        """
+        uri = "/fapi/v1/income"
+
+        params = {
+            "timestamp": tools.get_cur_timestamp_ms()
+        }
+        if(symbol is not None):
+            params["symbol"] = symbol
+        if(income_type is not None):
+            params["incomeType"] = income_type
+        if(start_time is not None):
+            params["startTime"] = start_time
+        if(end_time is not None):
+            params["endTime"] = end_time
+
+        success, error = await self.request("GET", uri, params=params, auth=True)
+        return success, error
+
+
+    async def get_leverage_bracket(self,symbol):
+        """
+        杠杆分层标准
+        [
+            {
+                "symbol": "ETHUSDT",
+                "brackets": [
+                    {
+                        "bracket": 1,   // 层级
+                        "initialLeverage": 75,  // 该层允许的最高初始杠杆倍数
+                        "notionalCap": 10000,  // 该层对应的名义价值上限
+                        "notionalFloor": 0,  // 该层对应的名义价值下限 
+                        "maintMarginRatio": 0.0065, // 该层对应的维持保证金率
+                        "cum":0 // 速算数
+                    },
+                ]
+            }
+        ]
+        或 (若发送symbol)
+        {
+            "symbol": "ETHUSDT",
+            "brackets": [
+                {
+                    "bracket": 1,
+                    "initialLeverage": 75,
+                    "notionalCap": 10000,
+                    "notionalFloor": 0,
+                    "maintMarginRatio": 0.0065,
+                    "cum":0
+                },
+            ]
+        }
+        """
+        uri = "/fapi/v1/leverageBracket"
+
+        params = {
+            "timestamp": tools.get_cur_timestamp_ms()
+        }
+        if(symbol is not None):
+            params["symbol"] = symbol
+
+        success, error = await self.request("GET", uri, params=params, auth=True)
+        return success, error
+
 
     async def request(self, method, uri, params=None, body=None, headers=None, auth=False):
         """Do HTTP request.
